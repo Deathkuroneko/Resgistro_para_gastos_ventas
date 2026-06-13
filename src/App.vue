@@ -1,14 +1,16 @@
 <template>
   <div id="app-container">
+    <nav class="bottom-nav">
+      <RouterLink to="/" class="nav-item">🛒 Ventas</RouterLink>
+      <RouterLink to="/Dashboard" class="nav-item">📊 Dashboard</RouterLink>
+      <RouterLink to="/inventario" class="nav-item">📦 Inventario</RouterLink>
+    </nav>
+
+
     <main class="content">
       <RouterView />
     </main>
-
-    <nav class="bottom-nav">
-      <RouterLink to="/ventas" class="nav-item">🛒 Ventas</RouterLink>
-      <RouterLink to="/" class="nav-item">📊 Dashboard</RouterLink>
-      <RouterLink to="/inventario" class="nav-item">📦 Inventario</RouterLink>
-    </nav>
+    
   </div>
 </template>
 

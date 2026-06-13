@@ -1,173 +1,446 @@
 <template>
-  <div class="page">
-    <h2>📦 Registro de Inventario</h2>
+  <div class="inventario-page">
+    <div class="encabezado">
+      <h2>📦 Inventario</h2>
+      <button @click="reiniciarFormulario" class="btn-secundario" type="button">
+        Nuevo
+      </button>
+    </div>
 
-    <form @submit.prevent="guardarProducto" class="form-producto">
-      <input v-model="nuevoProducto.codigo" type="text" placeholder="Código de barras / ID" required />
-      <input v-model="nuevoProducto.nombre" type="text" placeholder="Nombre del producto (Ej: Pan Injerto)" required />
-      <input v-model.number="nuevoProducto.precio_compra" type="number" step="0.01" placeholder="Precio de Compra ($)" required />
-      <input v-model.number="nuevoProducto.precio_venta" type="number" step="0.01" placeholder="Precio de Venta ($)" required />
-      <input v-model.number="nuevoProducto.stock" type="number" placeholder="Stock Inicial" required />
-      
-      <button type="submit" class="btn-guardar">💾 Guardar en SQLite</button>
+    <form @submit.prevent="guardarProducto" class="form-producto" :class="{ editando: productoEditandoId }">
+      <div v-if="productoEditandoId" class="modo-edicion">
+        Editando producto
+      </div>
+
+      <input v-model="form.nombre" type="text" placeholder="Nombre del producto" required />
+
+      <div class="fila-form">
+        <input
+          v-model.number="form.precio_compra"
+          class="input-compra"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Precio compra"
+          required
+        />
+        <input
+          v-model.number="form.precio_venta"
+          class="input-venta"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Precio venta"
+          required
+        />
+      </div>
+
+      <div class="fila-form">
+        <input
+          v-model.number="form.stock"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Cantidad"
+          required
+        />
+        <select v-model="form.unidad">
+          <option value="unidades">Unidades</option>
+          <option value="cajas">Cajas</option>
+          <option value="libras">Libras</option>
+          <option value="kilos">Kilos</option>
+        </select>
+      </div>
+
+      <input v-model="form.fecha_compra" type="date" required />
+      <textarea v-model="form.detalles" rows="3" placeholder="Detalles opcionales"></textarea>
+
+      <button type="submit" class="btn-guardar">
+        {{ productoEditandoId ? 'Actualizar producto' : 'Guardar producto' }}
+      </button>
     </form>
 
-    <hr />
-
-    <h3>Productos en Base de Datos</h3>
-    <button @click="cargarProductos" class="btn-refrescar">🔄 Actualizar Lista</button>
+    <div class="barra-lista">
+      <h3>Productos actuales</h3>
+      <button @click="cargarProductos" class="btn-secundario" type="button">
+        Actualizar
+      </button>
+    </div>
 
     <div v-if="productos.length === 0" class="no-datos">
       No hay productos registrados aún.
     </div>
 
-    <table v-else class="tabla-productos">
-      <thead>
-        <tr>
-          <th>Código</th>
-          <th>Nombre</th>
-          <th>Venta</th>
-          <th>Stock</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="prod in productos" :key="prod.id">
-          <td>{{ prod.codigo }}</td>
-          <td>{{ prod.nombre }}</td>
-          <td>${{ prod.precio_venta.toFixed(2) }}</td>
-          <td :class="{ 'sin-stock': prod.stock <= 0 }">{{ prod.stock }} u</td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else class="tabla-scroll">
+      <table class="tabla-productos">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Cantidad</th>
+            <th class="col-compra">Compra</th>
+            <th class="col-venta">Venta</th>
+            <th>Detalles</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template v-for="prod in productos" :key="prod.id">
+            <tr>
+              <td class="nombre-prod">{{ prod.nombre }}</td>
+              <td :class="{ 'sin-stock': Number(prod.stock) <= 0 }">
+                {{ formatoCantidad(prod) }}
+              </td>
+              <td class="precio-compra">${{ formatoDinero(prod.precio_compra) }}</td>
+              <td class="precio-venta">${{ formatoDinero(prod.precio_venta) }}</td>
+              <td>
+                <button @click="conmutarDetalles(prod.id)" class="btn-detalle" type="button">
+                  {{ productoDetalleId === prod.id ? 'Ocultar' : 'Ver' }}
+                </button>
+              </td>
+            </tr>
+
+            <tr v-if="productoDetalleId === prod.id" class="fila-detalle">
+              <td colspan="5">
+                <div class="detalle-box">
+                  <div>
+                    <strong>Fecha compra:</strong> {{ prod.fecha_compra || 'Sin fecha' }}
+                  </div>
+                  <div>
+                    <strong>Detalles:</strong> {{ prod.detalles || 'Sin detalles' }}
+                  </div>
+                  <div v-if="prod.fecha_actualizacion">
+                    <strong>Ultima actualizacion:</strong> {{ prod.fecha_actualizacion }}
+                  </div>
+
+                  <div class="acciones-detalle">
+                    <button @click="editarProducto(prod)" class="btn-editar" type="button">
+                      Editar
+                    </button>
+                    <button @click="eliminarProducto(prod)" class="btn-eliminar" type="button">
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-// Reemplaza la línea vieja por esta:
-import { getDatabase } from '@/services/db.js' // 📌 Importamos tu puente a SQLite
+import { ref, onMounted } from 'vue';
+import {
+  actualizarProductoInventario,
+  cargarProductosInventario,
+  eliminarProductoInventario,
+  guardarProductoInventario
+} from '@/services/inventarioService.js';
 
-// Estados reactivos de Vue
-const productos = ref([])
-const nuevoProducto = ref({
-  codigo: '',
+const productos = ref([]);
+const productoEditandoId = ref(null);
+const productoDetalleId = ref(null);
+
+const formVacio = () => ({
   nombre: '',
   precio_compra: '',
   precio_venta: '',
-  stock: ''
-})
+  stock: '',
+  unidad: 'unidades',
+  detalles: '',
+  fecha_compra: new Date().toISOString().slice(0, 10)
+});
 
-// Función para insertar un producto en la base de datos
-async function guardarProducto() {
-  try {
-    const db = await getDatabase()
-    
-    await db.execute(
-      `INSERT INTO productos (codigo, nombre, precio_compra, precio_venta, stock) 
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        nuevoProducto.value.codigo,
-        nuevoProducto.value.nombre,
-        nuevoProducto.value.precio_compra,
-        nuevoProducto.value.precio_venta,
-        nuevoProducto.value.stock
-      ]
-    )
+const form = ref(formVacio());
 
-    alert('¡Producto guardado localmente con éxito!')
-    
-    // Limpiamos el formulario y refrescamos la tabla
-    nuevoProducto.value = { codigo: '', nombre: '', precio_compra: '', precio_venta: '', stock: '' }
-    await cargarProductos()
-
-  } catch (error) {
-    console.error('Error al guardar en SQLite:', error)
-    alert('Error al guardar: ' + error)
-  }
+function formatoDinero(valor) {
+  return (Number(valor) || 0).toFixed(2);
 }
 
-// Función para consultar los productos de la base de datos
+function formatoCantidad(prod) {
+  const cantidad = Number(prod.stock) || 0;
+  return `${cantidad} ${prod.unidad || 'unidades'}`;
+}
+
 async function cargarProductos() {
   try {
-    const db = await getDatabase()
-    // db.select nos devuelve un array de objetos JSON directos desde las filas de SQLite
-    productos.value = await db.select('SELECT * FROM productos ORDER BY id DESC')
+    productos.value = await cargarProductosInventario();
   } catch (error) {
-    console.error('Error al leer de SQLite:', error)
+    console.error('Error al cargar inventario:', error);
+    alert('No se pudo cargar el inventario.');
   }
 }
 
-// Al cargar la pantalla por primera vez, lee los datos
-onMounted(() => {
-  cargarProductos()
-})
+async function guardarProducto() {
+  if (!form.value.nombre.trim()) {
+    alert('Escribe el nombre del producto.');
+    return;
+  }
+
+  try {
+    if (productoEditandoId.value) {
+      await actualizarProductoInventario(productoEditandoId.value, form.value);
+    } else {
+      await guardarProductoInventario(form.value);
+    }
+
+    reiniciarFormulario();
+    await cargarProductos();
+  } catch (error) {
+    console.error('Error al guardar inventario:', error);
+    alert('No se pudo guardar el producto.');
+  }
+}
+
+function editarProducto(prod) {
+  productoEditandoId.value = prod.id;
+  productoDetalleId.value = prod.id;
+  form.value = {
+    nombre: prod.nombre,
+    precio_compra: Number(prod.precio_compra) || 0,
+    precio_venta: Number(prod.precio_venta) || 0,
+    stock: Number(prod.stock) || 0,
+    unidad: prod.unidad || 'unidades',
+    detalles: prod.detalles || '',
+    fecha_compra: prod.fecha_compra || new Date().toISOString().slice(0, 10)
+  };
+}
+
+async function eliminarProducto(prod) {
+  const confirmar = confirm(`Eliminar "${prod.nombre}" del inventario actual?`);
+  if (!confirmar) return;
+
+  try {
+    await eliminarProductoInventario(prod.id);
+    if (productoEditandoId.value === prod.id) reiniciarFormulario();
+    if (productoDetalleId.value === prod.id) productoDetalleId.value = null;
+    await cargarProductos();
+  } catch (error) {
+    console.error('Error al eliminar producto:', error);
+    alert('No se pudo eliminar el producto.');
+  }
+}
+
+function conmutarDetalles(id) {
+  productoDetalleId.value = productoDetalleId.value === id ? null : id;
+}
+
+function reiniciarFormulario() {
+  productoEditandoId.value = null;
+  form.value = formVacio();
+}
+
+onMounted(cargarProductos);
 </script>
 
 <style scoped>
-.page {
+.inventario-page {
   padding: 15px;
-  max-width: 500px;
+  max-width: 760px;
   margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.encabezado,
+.barra-lista {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h2,
+h3 {
+  margin: 0 0 12px;
+  color: #222;
 }
 
 .form-producto {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+  margin-bottom: 18px;
 }
 
-.form-producto input {
-  padding: 10px;
-  border: 1px solid #ccc;
+.form-producto.editando {
+  border-color: #1f7a3a;
+  box-shadow: 0 0 0 3px rgba(31, 122, 58, 0.16);
+}
+
+.modo-edicion {
+  background: #eaf8ef;
+  color: #146c2e;
+  border: 1px solid #bfe8cc;
   border-radius: 6px;
-  font-size: 16px; /* Evita que iOS/Android hagan zoom molesto en inputs */
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.fila-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #cfd4da;
+  border-radius: 6px;
+  font-size: 15px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.input-compra {
+  background: #fff5e6;
+  border-color: #f2c27b;
+  color: #7a4700;
+}
+
+.input-compra::placeholder {
+  color: #9a5a00;
+}
+
+.input-venta {
+  background: #eaf8ef;
+  border-color: #a9dfba;
+  color: #146c2e;
+}
+
+.input-venta::placeholder {
+  color: #146c2e;
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .btn-guardar {
-  background-color: #28a745;
-  color: white;
+  background: #1f7a3a;
+  color: #fff;
   padding: 12px;
-  border: none;
-  border-radius: 6px;
-  font-weight: bold;
-  cursor: pointer;
 }
 
-.btn-refrescar {
-  background-color: #007bff;
-  color: white;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 4px;
-  margin-bottom: 10px;
+.btn-secundario {
+  background: #edf2f7;
+  color: #2d3748;
+  padding: 8px 12px;
+}
+
+.tabla-scroll {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
 }
 
 .tabla-productos {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 10px;
-  background: white;
+  min-width: 620px;
 }
 
-.tabla-productos th, .tabla-productos td {
-  border: 1px solid #ddd;
-  padding: 8px;
+.tabla-productos th,
+.tabla-productos td {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
   text-align: left;
   font-size: 14px;
 }
 
 .tabla-productos th {
-  background-color: #f2f2f2;
+  background: #f7f7f7;
+  color: #444;
+}
+
+.nombre-prod {
+  font-weight: 700;
+  color: #222;
+}
+
+.col-compra,
+.precio-compra {
+  background: #fff5e6;
+}
+
+.col-venta,
+.precio-venta {
+  background: #eaf8ef;
+}
+
+.precio-compra {
+  color: #9a5a00;
+  font-family: monospace;
+  font-weight: 700;
+}
+
+.precio-venta {
+  color: #146c2e;
+  font-family: monospace;
+  font-weight: 700;
 }
 
 .sin-stock {
-  color: red;
-  font-weight: bold;
+  color: #dc3545;
+  font-weight: 700;
+}
+
+.btn-detalle {
+  background: #f1f3f5;
+  color: #495057;
+  padding: 7px 10px;
+}
+
+.fila-detalle td {
+  background: #fafafa;
+}
+
+.detalle-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #444;
+}
+
+.acciones-detalle {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-editar {
+  background: #0d6efd;
+  color: #fff;
+  padding: 8px 10px;
+}
+
+.btn-eliminar {
+  background: #dc3545;
+  color: #fff;
+  padding: 8px 10px;
 }
 
 .no-datos {
   text-align: center;
   color: #777;
-  padding: 20px;
+  padding: 24px;
 }
+
 </style>

@@ -10,6 +10,17 @@ function obtenerFechaHoraLocal() {
   return `${hoyCorto} ${horaCorta}`;
 }
 
+function obtenerRangoDiaLocal(fecha = new Date()) {
+  const inicio = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+  const fin = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() + 1);
+  const formatear = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  return {
+    inicio: `${formatear(inicio)} 00:00:00`,
+    fin: `${formatear(fin)} 00:00:00`
+  };
+}
+
 /**
  * Inserta un renglón de movimiento (Ingreso o Gasto) directamente en el cuaderno de caja
  */
@@ -61,13 +72,11 @@ export async function eliminarRenglonCaja(id) {
 export async function cargarRenglonesHoy() {
   const db = await getDatabase();
   try {
-    const d = new Date();
-    // Filtro inicial YYYY-MM-DD
-    const hoyCorto = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const { inicio, fin } = obtenerRangoDiaLocal();
 
     return await db.select(
-      "SELECT * FROM registro_caja WHERE fecha LIKE ? ORDER BY id DESC",
-      [`${hoyCorto}%`]
+      "SELECT * FROM registro_caja WHERE fecha >= ? AND fecha < ? ORDER BY id DESC",
+      [inicio, fin]
     );
   } catch (error) {
     console.error("❌ Error al recuperar los renglones de hoy:", error);

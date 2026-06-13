@@ -11,6 +11,15 @@ export async function getDatabase() {
   return db;
 }
 
+async function agregarColumnaSiNoExiste(database, tabla, columna, definicion) {
+  const columnas = await database.select(`PRAGMA table_info(${tabla})`);
+  const existe = columnas.some((col) => col.name === columna);
+
+  if (!existe) {
+    await database.execute(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${definicion}`);
+  }
+}
+
 // 2. Función para inicializar las tablas desde cero
 export async function initDatabase() {
   const database = await getDatabase();
@@ -30,14 +39,56 @@ export async function initDatabase() {
       );
     `);
 
+  await database.execute(`
+    CREATE INDEX IF NOT EXISTS idx_registro_caja_fecha_tipo
+    ON registro_caja (fecha, tipo);
+  `);
+
+  await database.execute(`
+    CREATE INDEX IF NOT EXISTS idx_registro_caja_tipo_fecha
+    ON registro_caja (tipo, fecha);
+  `);
+
   // Creamos la tabla de productos (sirve como plantilla de autocompletado rápido)
   await database.execute(`
     CREATE TABLE IF NOT EXISTS productos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL,
+      precio_compra REAL DEFAULT 0,
       precio_venta REAL NOT NULL,
-      stock REAL NOT NULL
+      stock REAL NOT NULL,
+      unidad TEXT DEFAULT 'unidades',
+      detalles TEXT,
+      fecha_compra TEXT,
+      fecha_actualizacion TEXT
     );
+  `);
+
+  await agregarColumnaSiNoExiste(database, 'productos', 'precio_compra', 'REAL DEFAULT 0');
+  await agregarColumnaSiNoExiste(database, 'productos', 'unidad', "TEXT DEFAULT 'unidades'");
+  await agregarColumnaSiNoExiste(database, 'productos', 'detalles', 'TEXT');
+  await agregarColumnaSiNoExiste(database, 'productos', 'fecha_compra', 'TEXT');
+  await agregarColumnaSiNoExiste(database, 'productos', 'fecha_actualizacion', 'TEXT');
+
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS productos_historial (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      producto_id INTEGER,
+      accion TEXT NOT NULL,             -- 'CREADO', 'EDITADO' o 'ELIMINADO'
+      nombre TEXT NOT NULL,
+      precio_compra REAL DEFAULT 0,
+      precio_venta REAL NOT NULL,
+      stock REAL NOT NULL,
+      unidad TEXT DEFAULT 'unidades',
+      detalles TEXT,
+      fecha_compra TEXT,
+      fecha_accion TEXT NOT NULL
+    );
+  `);
+
+  await database.execute(`
+    CREATE INDEX IF NOT EXISTS idx_productos_historial_producto_fecha
+    ON productos_historial (producto_id, fecha_accion);
   `);
 
   // Inyectamos productos de prueba si la tabla está vacía

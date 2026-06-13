@@ -1,5 +1,17 @@
 import { getDatabase } from './db.js';
 
+function obtenerRangoDia(fechaCorta) {
+  const [year, month, day] = fechaCorta.split('-').map(Number);
+  const inicio = new Date(year, month - 1, day);
+  const fin = new Date(year, month - 1, day + 1);
+  const formatear = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  return {
+    inicio: `${formatear(inicio)} 00:00:00`,
+    fin: `${formatear(fin)} 00:00:00`
+  };
+}
+
 /**
  * Obtiene el resumen agrupado por días (Fechas únicas en las que hay registros)
  * Realiza un cálculo limpio de ingresos, gastos y balance neto diario.
@@ -7,46 +19,30 @@ import { getDatabase } from './db.js';
 export async function cargarResumenDias() {
   const db = await getDatabase();
   try {
-    // Extrae la parte YYYY-MM-DD única de la columna fecha
-    const dias = await db.select(`
-      SELECT DISTINCT SUBSTR(fecha, 1, 10) as fecha_corta 
-      FROM registro_caja 
+    const resumen = await db.select(`
+      SELECT
+        SUBSTR(fecha, 1, 10) as fecha_corta,
+        COALESCE(SUM(CASE WHEN tipo = 'INGRESO' THEN total ELSE 0 END), 0) as ingresos,
+        COALESCE(SUM(CASE WHEN tipo = 'GASTO' THEN total ELSE 0 END), 0) as gastos
+      FROM registro_caja
+      GROUP BY fecha_corta
       ORDER BY fecha_corta DESC
     `);
 
-    let resumenCompleto = [];
+    return resumen.map((dia) => {
+      const ingresos = Number(dia.ingresos) || 0;
+      const gastos = Number(dia.gastos) || 0;
 
-    for (const d of dias) {
-      const fecha = d.fecha_corta;
-
-      // Calculamos ingresos totales de ese día
-      const resIngresos = await db.select(
-        "SELECT SUM(total) as total FROM registro_caja WHERE fecha LIKE ? AND tipo = 'INGRESO'",
-        [`${fecha}%`]
-      );
-      
-      // Calculamos gastos totales de ese día
-      const resGastos = await db.select(
-        "SELECT SUM(total) as total FROM registro_caja WHERE fecha LIKE ? AND tipo = 'GASTO'",
-        [`${fecha}%`]
-      );
-
-      const ingresos = resIngresos[0]?.total || 0;
-      const gastos = resGastos[0]?.total || 0;
-      const neto = ingresos - gastos;
-
-      resumenCompleto.push({
-        fecha_corta: fecha,
+      return {
+        fecha_corta: dia.fecha_corta,
         ingresos,
         gastos,
-        neto,
+        neto: ingresos - gastos,
         detallesCargados: false, // Control para Lazy Load en la interfaz
         detalles: [],
         detallesFiltro: null
-      });
-    }
-
-    return resumenCompleto;
+      };
+    });
   } catch (error) {
     console.error("❌ Error en resumen por días (Dashboard):", error);
     return [];
@@ -59,16 +55,18 @@ export async function cargarResumenDias() {
 export async function cargarDetallesDia(fechaCorta, tipo = null) {
   const db = await getDatabase();
   try {
+    const { inicio, fin } = obtenerRangoDia(fechaCorta);
+
     if (tipo) {
       return await db.select(
-        "SELECT * FROM registro_caja WHERE fecha LIKE ? AND tipo = ? ORDER BY id ASC",
-        [`${fechaCorta}%`, tipo]
+        "SELECT * FROM registro_caja WHERE fecha >= ? AND fecha < ? AND tipo = ? ORDER BY id ASC",
+        [inicio, fin, tipo]
       );
     }
 
     return await db.select(
-      "SELECT * FROM registro_caja WHERE fecha LIKE ? ORDER BY id ASC",
-      [`${fechaCorta}%`]
+      "SELECT * FROM registro_caja WHERE fecha >= ? AND fecha < ? ORDER BY id ASC",
+      [inicio, fin]
     );
   } catch (error) {
     console.error("❌ Error al cargar detalles específicos en el Dashboard:", error);
